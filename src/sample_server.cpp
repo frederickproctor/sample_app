@@ -1,8 +1,28 @@
-/*!
-  \file sample_sever.cpp
+/*
+  sample_sever.cpp
 
-  \brief Sample code for setting up a server application that handles
+  Sample code for setting up a server application that handles
   arbitrarily many client connections.
+
+  Run as:
+
+  sample_server -p <TCP/IP port #> -d
+
+  where -d turns debug printing on. Both options are optional, with the
+  port defaulting to 1234 as defined in sample_app.h.
+
+  The server application maintains a simple database of one
+  number. The number can be changed at the user prompt by just
+  entering a number. Any number of client applications can connect and
+  either read the number or set it. 
+  
+  The application consists of two threads, and a thread for each
+  client connection. The main thread just reads user input and either
+  prints or sets the database number. A second client listener thread
+  listens for ciient connections, and creates a handler thread that
+  reads client requests to "read" or "write" a number to the database.
+  These are plain ASCII strings, and the client handler accesses the
+  database accordingly, and sends back the database number.
 */
 
 #include <stdio.h>		/* stdin, stderr */
@@ -18,7 +38,7 @@
 */
 typedef struct {
   ulapi_mutex_struct *mutex;
-  int count;
+  int number;
 } server_db_struct;
 
 typedef struct {
@@ -38,7 +58,7 @@ void client_handler_code(void *args)
   char inbuf[BUFFERLEN];
   char outbuf[BUFFERLEN];
   ulapi_integer nchars;
-  int newcount;
+  int newnumber;
 
   client_handler_task = ((client_handler_args *) args)->client_handler_task;
   client_id = ((client_handler_args *) args)->client_id;
@@ -71,18 +91,18 @@ void client_handler_code(void *args)
       Parse and handle the message here as your application requires.
     */
     if (!strncmp(inbuf, "write", strlen("write"))) {
-      sscanf(inbuf, "%*s %d", &newcount);
+      sscanf(inbuf, "%*s %d", &newnumber);
       ulapi_mutex_take(server_db_ptr->mutex);
-      server_db_ptr->count = newcount;
+      server_db_ptr->number = newnumber;
       ulapi_mutex_give(server_db_ptr->mutex);
     } else if (!strcmp(inbuf, "read")) {
       ulapi_mutex_take(server_db_ptr->mutex);
-      newcount = server_db_ptr->count;
+      newnumber = server_db_ptr->number;
       ulapi_mutex_give(server_db_ptr->mutex);
     } else {
       fprintf(stderr, "unknown request ``%s''\n", inbuf);
     }
-    ulapi_snprintf(outbuf, sizeof(outbuf), "%d", newcount);
+    ulapi_snprintf(outbuf, sizeof(outbuf), "%d", newnumber);
     outbuf[sizeof(outbuf)-1] = 0;
     ulapi_socket_write(client_id, outbuf, strlen(outbuf)+1);
   }
@@ -157,7 +177,7 @@ int main(int argc, char *argv[])
   enum {BUFFERLEN = 256};
   char buffer[BUFFERLEN];
   char *ptr;
-  int count;
+  int number;
 
   ulapi_opterr = 0;
 
@@ -212,7 +232,7 @@ int main(int argc, char *argv[])
   if (debug) printf("serving port %d\n", (int) port);
 
   server_db.mutex = ulapi_mutex_new(0);
-  server_db.count = 0;
+  server_db.number = 0;
 
   server_listen_task = ulapi_task_new();
   server_listen_args_ptr = reinterpret_cast<server_listen_args *>(malloc(sizeof(server_listen_args)));
@@ -222,13 +242,33 @@ int main(int argc, char *argv[])
   server_listen_args_ptr->debug = debug;
   ulapi_task_start(server_listen_task, server_listen_code, server_listen_args_ptr, ulapi_prio_lowest(), 0);
 
-  /* enter application main loop */
-  while (!feof(stdin)) {
+  /*
+    Enter the application main loop. Here is where you would put your
+    main application code, which should enter a continual loop, since
+    the client handler has already been started as a thread. Note that
+    if your application ends, all the threads end and the entire
+    application will terminate. This is fine to do as long as you are
+    completely finished.
 
+    The loop below just prints a prompt and waits for user
+    input. Input could be: 
+
+    q          - quit the loop and the whole application
+    blank line - print the current value of the server database number
+    <a number> - set the value of the server database number
+  */
+
+  while (!feof(stdin)) {
+    /* print the prompt */
+    printf("> ");
+    fflush(stdout);
+
+    /* read input from the terminal */
     if (NULL == fgets(buffer, sizeof(buffer), stdin)) {
       break;
     }
 
+    /* skip over leading white space to make parsing easier */
     ptr = buffer;
     while (isspace(*ptr)) ptr++;
 
@@ -236,15 +276,15 @@ int main(int argc, char *argv[])
 
     if (0 == *ptr) {
       ulapi_mutex_take(server_db.mutex);
-      count = server_db.count;
+      number = server_db.number;
       ulapi_mutex_give(server_db.mutex);
-      printf("%d\n", count);
+      printf("%d\n", number);
       continue;
     }
 
-    if (1 == sscanf(ptr, "%d", &count)) {
+    if (1 == sscanf(ptr, "%d", &number)) {
       ulapi_mutex_take(server_db.mutex);
-      server_db.count = count;
+      server_db.number = number;
       ulapi_mutex_give(server_db.mutex);
       continue;
     }

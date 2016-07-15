@@ -1,7 +1,29 @@
-/*!
-  \file sample_client.cpp
+/*
+  sample_client.cpp
 
-  \brief Sample code for setting up a client application.
+  Sample code for setting up a client application that connects to a
+  server and makes requests to read or write a database number.
+
+  Run as:
+
+  sample_client -p <TCP/IP port #> -h <host name> -d
+
+  where -d turns debug printing on. All options are optional, with the
+  port defaulting to 1234 as defined in sample_app.h, and the host
+  defaulting to "localhost". 
+
+  The client application maintains a simple database of one
+  number. The number can be changed at the user prompt by just
+  entering a number. When the number is changed, a request is made to
+  the server to change its database number to match. 
+  
+  The application consists of two threads. The main thread just reads
+  user input and either prints or sets the local database number. A
+  second client thread loops every second, and checks if the local
+  database number has been changed from what was last sent to the
+  server. If it has changed, the client requests to "read" or "write"
+  this number to the server.  The client then waits for the server to
+  reply with its number.
 */
 
 #include <stdio.h>		/* stdin, stderr */
@@ -14,7 +36,7 @@
 
 typedef struct {
   ulapi_mutex_struct *mutex;
-  int count;
+  int number;
 } client_db_struct;
 
 typedef struct {
@@ -34,8 +56,8 @@ void client_code(void *args)
   char inbuf[BUFFERLEN];
   char outbuf[BUFFERLEN];
   ulapi_integer nchars;
-  int count;
-  int lastcount = 0;
+  int number;
+  int lastnumber = 0;
 
   client_task = ((client_args *) args)->client_task;
   client_id = ((client_args *) args)->client_id;
@@ -50,12 +72,12 @@ void client_code(void *args)
 
   for (;;) {
     ulapi_mutex_take(client_db_ptr->mutex);
-    count = client_db_ptr->count;
+    number = client_db_ptr->number;
     ulapi_mutex_give(client_db_ptr->mutex);
 
-    if (count != lastcount) {
-      ulapi_snprintf(outbuf, sizeof(outbuf), "write %d", count);
-      lastcount = count;
+    if (number != lastnumber) {
+      ulapi_snprintf(outbuf, sizeof(outbuf), "write %d", number);
+      lastnumber = number;
     } else {
       ulapi_snprintf(outbuf, sizeof(outbuf), "read");
     }
@@ -99,7 +121,7 @@ int main(int argc, char *argv[])
   client_db_struct client_db;
   char buffer[BUFFERLEN];
   char *ptr;
-  int count;
+  int number;
 
   ulapi_opterr = 0;
 
@@ -161,7 +183,7 @@ int main(int argc, char *argv[])
   }
 
   client_db.mutex = ulapi_mutex_new(0);
-  client_db.count = 0;
+  client_db.number = 0;
 
   client_task = ulapi_task_new();
   client_args_ptr = reinterpret_cast<client_args *>(malloc(sizeof(client_args)));
@@ -185,15 +207,15 @@ int main(int argc, char *argv[])
 
     if (0 == *ptr) {
       ulapi_mutex_take(client_db.mutex);
-      count = client_db.count;
+      number = client_db.number;
       ulapi_mutex_give(client_db.mutex);
-      printf("%d\n", count);
+      printf("%d\n", number);
       continue;
     }
 
-    if (1 == sscanf(ptr, "%d", &count)) {
+    if (1 == sscanf(ptr, "%d", &number)) {
       ulapi_mutex_take(client_db.mutex);
-      client_db.count = count;
+      client_db.number = number;
       ulapi_mutex_give(client_db.mutex);
       continue;
     }
